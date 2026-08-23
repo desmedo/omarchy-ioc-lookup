@@ -104,10 +104,7 @@ Item {
   function runBatchLookup() {
     if (!root.batchList || root.batchList.length === 0) return
     root.batchLoading = true
-    var dataStr = JSON.stringify(root.batchList)
-    var tmpFile = "/tmp/ioc_batch_" + Date.now() + ".json"
-    Quickshell.execDetached(["python3", "-c", "with open('" + tmpFile + "', 'w') as f: f.write('''" + dataStr.replace(/'/g, "\\'") + "''')"])
-    batchLookupProc.command = ["python3", root.lookupScript, "--batch-file", tmpFile]
+    batchLookupProc.command = ["python3", root.lookupScript, "--batch-ipc"]
     batchLookupProc.running = true
   }
 

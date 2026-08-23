@@ -568,18 +568,6 @@ def main():
     arg1 = sys.argv[1]
 
     # Batch JSON lookup
-    if arg1 in ("--batch-file",):
-        try:
-            filename = sys.argv[2]
-            with open(filename, 'r') as f:
-                items = json.loads(f.read())
-            os.remove(filename)  # Clean up temp file
-            enriched = batch_lookup_all(items, config)
-            print(json.dumps(enriched))
-        except Exception as e:
-            print(json.dumps({"status": "error", "message": str(e)}))
-        return
-
     if arg1 in ("--batch-ipc",):
         try:
             # Connect to omarchy-shell via IPC to securely retrieve the list without command line exposure
