@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "desmedo.ioc-lookup",
+  "name": "IOCs Lookup",
+  "version": "1.0.0",
+  "author": "Antigravity & desmedo",
+  "license": "MIT",
+  "description": "Instant Indicators of Compromise (IOC) analyzer, threat intelligence launcher, and defanger.",
+  "kinds": ["overlay"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Overlay.qml"
+  }
+}

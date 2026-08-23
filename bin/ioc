@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Omarchy IOCs Lookup CLI Tool
+LOOKUP_SCRIPT="$HOME/.config/omarchy/plugins/desmedo.ioc-lookup/scripts/lookup.py"
+
+if [[ "$1" == "--ui" || "$1" == "-u" || "$1" == "--open" ]]; then
+  exec omarchy-shell desmedo.ioc-lookup toggle
+fi
+
+if [[ -z "$1" ]]; then
+  echo "Omarchy IOCs Threat Intelligence & Defanger"
+  echo "Usage:"
+  echo "  ioc <indicator>        Lookup IP, Domain, Hash, CVE, URL"
+  echo "  ioc -d, --defang <str> Defang URLs/IPs (e.g. hxxps://bad[.]com)"
+  echo "  ioc -r, --refang <str> Refang URLs/IPs (e.g. https://bad.com)"
+  echo "  ioc -e, --extract      Extract all IOCs from text or piped logs"
+  echo "  ioc -H, --history      View recent investigation history"
+  echo "  ioc -E, --export       Export investigation history as Markdown"
+  echo "  ioc --ui               Open the Omarchy graphical overlay"
+  exit 0
+fi
+
+exec python3 "$LOOKUP_SCRIPT" "$@"
