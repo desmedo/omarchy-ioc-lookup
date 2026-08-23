@@ -179,11 +179,13 @@ function classify(raw) {
 // ------------------------------------------------------------- Batch Extractor
 function extractAll(rawText) {
   if (!rawText) return []
-  var text = String(rawText)
+  var text = String(rawText).substring(0, 50000)
   var seen = {}
   var results = []
+  var MAX_RESULTS = 50
 
   function addMatch(candidate) {
+    if (results.length >= MAX_RESULTS) return
     if (!candidate) return
     var item = classify(candidate)
     if (item.type !== "empty" && item.type !== "text") {

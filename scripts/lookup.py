@@ -12,6 +12,7 @@ import urllib.parse
 import os
 import re
 import ipaddress
+import subprocess
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
@@ -567,6 +568,32 @@ def main():
     arg1 = sys.argv[1]
 
     # Batch JSON lookup
+    if arg1 in ("--batch-file",):
+        try:
+            filename = sys.argv[2]
+            with open(filename, 'r') as f:
+                items = json.loads(f.read())
+            os.remove(filename)  # Clean up temp file
+            enriched = batch_lookup_all(items, config)
+            print(json.dumps(enriched))
+        except Exception as e:
+            print(json.dumps({"status": "error", "message": str(e)}))
+        return
+
+    if arg1 in ("--batch-ipc",):
+        try:
+            # Connect to omarchy-shell via IPC to securely retrieve the list without command line exposure
+            result = subprocess.run(["omarchy-shell", "desmedo.ioc-lookup", "getBatchData"], capture_output=True, text=True, timeout=3)
+            if result.returncode != 0:
+                print(json.dumps({"status": "error", "message": "Failed to IPC getBatchData: " + result.stderr}))
+                return
+            items = json.loads(result.stdout)
+            enriched = batch_lookup_all(items, config)
+            print(json.dumps(enriched))
+        except Exception as e:
+            print(json.dumps({"status": "error", "message": str(e)}))
+        return
+
     if arg1 in ("--batch", "-b"):
         raw_json = sys.argv[2] if len(sys.argv) > 2 else sys.stdin.read()
         try:

@@ -104,7 +104,10 @@ Item {
   function runBatchLookup() {
     if (!root.batchList || root.batchList.length === 0) return
     root.batchLoading = true
-    batchLookupProc.command = ["python3", root.lookupScript, "--batch", JSON.stringify(root.batchList)]
+    var dataStr = JSON.stringify(root.batchList)
+    var tmpFile = "/tmp/ioc_batch_" + Date.now() + ".json"
+    Quickshell.execDetached(["python3", "-c", "with open('" + tmpFile + "', 'w') as f: f.write('''" + dataStr.replace(/'/g, "\\'") + "''')"])
+    batchLookupProc.command = ["python3", root.lookupScript, "--batch-file", tmpFile]
     batchLookupProc.running = true
   }
 
@@ -223,7 +226,7 @@ Item {
 
   Process {
     id: clipProc
-    command: ["wl-paste", "--no-newline"]
+    command: ["sh", "-c", "wl-paste --no-newline | head -c 50000"]
     stdout: StdioCollector {
       id: clipCollector
       waitForEnd: true
@@ -293,6 +296,7 @@ Item {
     function open(payloadJson: string): string { root.open(payloadJson); return "ok" }
     function close(): string { root.close(); return "ok" }
     function toggle(): string { root.toggle(); return "ok" }
+    function getBatchData(): string { return JSON.stringify(root.batchList) }
   }
 
   // ------------------------------------------------------------- UI
