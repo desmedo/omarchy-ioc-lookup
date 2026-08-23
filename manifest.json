@@ -3,12 +3,13 @@
   "id": "desmedo.ioc-lookup",
   "name": "IOCs Lookup",
   "version": "1.0.0",
-  "author": "Antigravity & desmedo",
+  "author": "desmedo",
   "license": "MIT",
-  "description": "Instant Indicators of Compromise (IOC) analyzer, threat intelligence launcher, and defanger.",
+  "description": "Instant Indicators of Compromise (IOC) analyzer, threat intelligence launcher, defanger, and batch extractor for Omarchy.",
   "kinds": ["overlay"],
   "keepLoaded": true,
   "entryPoints": {
     "overlay": "Overlay.qml"
-  }
+  },
+  "repository": "https://github.com/desmedo/omarchy-ioc-lookup"
 }
