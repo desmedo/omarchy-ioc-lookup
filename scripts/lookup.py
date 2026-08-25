@@ -14,10 +14,28 @@ import re
 import ipaddress
 import subprocess
 from datetime import datetime
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
-CONFIG_PATH = os.path.expanduser("~/.config/omarchy/ioc-lookup.json")
+CONFIG_PATH  = os.path.expanduser("~/.config/omarchy/ioc-lookup.json")
 HISTORY_PATH = os.path.expanduser("~/.local/state/omarchy/ioc-history.json")
+
+# Per-provider concurrency caps (applied across all batch workers simultaneously).
+# These prevent hammering rate-limited APIs when scanning large IOC batches.
+#   ip-api.com   free tier: 45 req/min  → max 2 simultaneous
+#   AbuseIPDB    free tier: 1000/day    → max 2 simultaneous
+#   VirusTotal   free tier: 4 req/min   → max 1 simultaneous (sequential)
+#   GreyNoise    community: ~1 req/s    → max 1 simultaneous
+#   Cloudflare   DNS-over-HTTPS: generous → max 6 simultaneous
+#   RDAP/NVD     public APIs            → max 3 simultaneous
+_SEM_GEOIP    = threading.Semaphore(2)
+_SEM_ABUSE    = threading.Semaphore(2)
+_SEM_VT       = threading.Semaphore(1)
+_SEM_GREY     = threading.Semaphore(1)
+_SEM_DNS      = threading.Semaphore(6)
+_SEM_RDAP     = threading.Semaphore(3)
+_SEM_NVD      = threading.Semaphore(2)
+
 
 def load_config():
     if os.path.isfile(CONFIG_PATH):
@@ -184,32 +202,35 @@ def lookup_ip(ip, config):
             return ""
 
     def get_geoip():
-        url = f"http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,reverse,query"
-        return fetch_json(url, timeout=2.5)
+        with _SEM_GEOIP:
+            url = f"http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,reverse,query"
+            return fetch_json(url, timeout=2.5)
 
     def get_abuseipdb():
         key = config.get("abuseipdb_api_key")
         if not key:
             return None
-        url = f"https://api.abuseipdb.com/api/v2/check?ipAddress={urllib.parse.quote(ip)}&maxAgeInDays=90&verbose=false"
-        return fetch_json(url, headers={"Key": key, "Accept": "application/json"}, timeout=2.5)
+        with _SEM_ABUSE:
+            url = f"https://api.abuseipdb.com/api/v2/check?ipAddress={urllib.parse.quote(ip)}&maxAgeInDays=90&verbose=false"
+            return fetch_json(url, headers={"Key": key, "Accept": "application/json"}, timeout=2.5)
 
     def get_virustotal_ip():
         key = config.get("virustotal_api_key")
         if not key:
             return None
-        url = f"https://www.virustotal.com/api/v3/ip_addresses/{urllib.parse.quote(ip)}"
-        return fetch_json(url, headers={"x-apikey": key}, timeout=3.0)
+        with _SEM_VT:
+            url = f"https://www.virustotal.com/api/v3/ip_addresses/{urllib.parse.quote(ip)}"
+            return fetch_json(url, headers={"x-apikey": key}, timeout=3.0)
 
     def get_greynoise():
-        # Community endpoint — no key required, 1 req/s limit
-        url = f"https://api.greynoise.io/v3/community/{urllib.parse.quote(ip)}"
-        headers = {}
-        key = config.get("greynoise_api_key")
-        if key:
-            url = f"https://api.greynoise.io/v2/noise/quick/{urllib.parse.quote(ip)}"
-            headers = {"key": key}
-        return fetch_json(url, headers=headers, timeout=2.5)
+        with _SEM_GREY:
+            key = config.get("greynoise_api_key")
+            if key:
+                url = f"https://api.greynoise.io/v2/noise/quick/{urllib.parse.quote(ip)}"
+                return fetch_json(url, headers={"key": key}, timeout=2.5)
+            # Community endpoint — no key required, ~1 req/s
+            url = f"https://api.greynoise.io/v3/community/{urllib.parse.quote(ip)}"
+            return fetch_json(url, timeout=2.5)
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         f_ptr   = executor.submit(get_ptr)
@@ -301,50 +322,57 @@ def lookup_domain(domain, config):
     }
 
     def get_dns_a():
-        url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=A"
-        res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
-        if res and "Answer" in res:
-            return [a["data"] for a in res["Answer"] if a.get("type") == 1]
-        return []
+        with _SEM_DNS:
+            url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=A"
+            res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
+            if res and "Answer" in res:
+                return [a["data"] for a in res["Answer"] if a.get("type") == 1]
+            return []
 
     def get_dns_aaaa():
-        url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=AAAA"
-        res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
-        if res and "Answer" in res:
-            return [a["data"] for a in res["Answer"] if a.get("type") == 28]
-        return []
+        with _SEM_DNS:
+            url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=AAAA"
+            res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
+            if res and "Answer" in res:
+                return [a["data"] for a in res["Answer"] if a.get("type") == 28]
+            return []
 
     def get_dns_mx():
-        url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=MX"
-        res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
-        if res and "Answer" in res:
-            return [a["data"] for a in res["Answer"] if a.get("type") == 15]
-        return []
+        with _SEM_DNS:
+            url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=MX"
+            res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
+            if res and "Answer" in res:
+                return [a["data"] for a in res["Answer"] if a.get("type") == 15]
+            return []
 
     def get_dns_ns():
-        url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=NS"
-        res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
-        if res and "Answer" in res:
-            return [a["data"] for a in res["Answer"] if a.get("type") == 2]
-        return []
+        with _SEM_DNS:
+            url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=NS"
+            res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
+            if res and "Answer" in res:
+                return [a["data"] for a in res["Answer"] if a.get("type") == 2]
+            return []
 
     def get_dns_txt():
-        url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=TXT"
-        res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
-        if res and "Answer" in res:
-            return [a["data"].strip('"') for a in res["Answer"] if a.get("type") == 16][:3]
-        return []
+        with _SEM_DNS:
+            url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=TXT"
+            res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
+            if res and "Answer" in res:
+                return [a["data"].strip('"') for a in res["Answer"] if a.get("type") == 16][:3]
+            return []
 
     def get_rdap():
-        url = f"https://rdap.org/domain/{urllib.parse.quote(domain)}"
-        return fetch_json(url, headers={"Accept": "application/json"}, timeout=2.5)
+        with _SEM_RDAP:
+            url = f"https://rdap.org/domain/{urllib.parse.quote(domain)}"
+            return fetch_json(url, headers={"Accept": "application/json"}, timeout=2.5)
 
     def get_virustotal_domain():
         key = config.get("virustotal_api_key")
         if not key:
             return None
-        url = f"https://www.virustotal.com/api/v3/domains/{urllib.parse.quote(domain)}"
-        return fetch_json(url, headers={"x-apikey": key}, timeout=3.0)
+        with _SEM_VT:
+            url = f"https://www.virustotal.com/api/v3/domains/{urllib.parse.quote(domain)}"
+            return fetch_json(url, headers={"x-apikey": key}, timeout=3.0)
 
     with ThreadPoolExecutor(max_workers=7) as executor:
         f_a    = executor.submit(get_dns_a)
@@ -453,7 +481,8 @@ def lookup_cve(cve_id, config):
     }
 
     url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={urllib.parse.quote(cve_upper)}"
-    data = fetch_json(url, timeout=3.5)
+    with _SEM_NVD:
+        data = fetch_json(url, timeout=3.5)
 
     if data and "vulnerabilities" in data and len(data["vulnerabilities"]) > 0:
         cve_node = data["vulnerabilities"][0].get("cve", {})
@@ -536,8 +565,9 @@ def lookup_hash(hash_val, config):
 
     vt_key = config.get("virustotal_api_key")
     if vt_key:
-        url = f"https://www.virustotal.com/api/v3/files/{hash_val}"
-        vt_data = fetch_json(url, headers={"x-apikey": vt_key}, timeout=2.5)
+        with _SEM_VT:
+            url = f"https://www.virustotal.com/api/v3/files/{hash_val}"
+            vt_data = fetch_json(url, headers={"x-apikey": vt_key}, timeout=2.5)
         if vt_data and "data" in vt_data:
             attrs = vt_data["data"].get("attributes", {})
             stats = attrs.get("last_analysis_stats", {})
@@ -600,23 +630,34 @@ def run_single_enrichment(item, config):
                     summary += f" ({details['as']})"
                 if "abuse_score" in details:
                     summary += f" • Abuse: {details['abuse_score']}%"
+                if details.get("vt_malicious"):
+                    summary += f" • VT: {details['vt_malicious']} detections"
+                if details.get("greynoise_noise"):
+                    summary += f" • GreyNoise: {details.get('greynoise_classification', 'noise')}"
         elif t == "domain":
             details = lookup_domain(ref, config)
             if details.get("ips"):
                 summary = f"IPs: {', '.join(details['ips'][:2])}"
             if details.get("registrar"):
                 summary += f" • Registrar: {details['registrar']}"
+            if details.get("vt_malicious"):
+                summary += f" • VT: {details['vt_malicious']} detections"
         elif t == "cve":
             details = lookup_cve(ref, config)
             summary = f"Score: {details.get('score', 'N/A')} {details.get('severity', '')} • {details.get('description', '')[:50]}"
         elif t in ("md5", "sha1", "sha256", "sha512", "hash"):
             details = lookup_hash(ref, config)
+            total = details.get("vt_malicious", 0) + details.get("vt_harmless", 0) + details.get("vt_undetected", 0)
             summary = f"{details.get('algorithm', 'Hash')} ({details.get('length', 0)} chars)"
             if "vt_malicious" in details:
-                summary += f" • VT Malicious: {details['vt_malicious']}"
+                summary += f" • VT: {details['vt_malicious']}/{total} detections"
+                if details.get("meaningful_name"):
+                    summary += f" [{details['meaningful_name']}]"
         elif t == "url":
             details = lookup_url(ref, config)
             summary = f"Host: {details.get('host', '')} • Path: {details.get('path', '/')}"
+            if details.get("vt_malicious"):
+                summary += f" • VT: {details['vt_malicious']} detections"
         else:
             summary = "Indicator"
     except Exception as e:
@@ -630,7 +671,11 @@ def run_single_enrichment(item, config):
 def batch_lookup_all(items_list, config):
     if not items_list:
         return []
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    # Outer pool is intentionally small (4 workers). Each lookup spawns its own
+    # inner thread pool; keeping the outer count low prevents a thread explosion
+    # (e.g. 50 IOCs × 7 inner workers = 350 threads) and lets the module-level
+    # per-API semaphores do their rate-limiting job effectively.
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = [executor.submit(run_single_enrichment, item, config) for item in items_list]
         return [f.result() for f in futures]
 
