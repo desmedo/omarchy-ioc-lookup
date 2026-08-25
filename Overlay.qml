@@ -104,6 +104,7 @@ Item {
   function runBatchLookup() {
     if (!root.batchList || root.batchList.length === 0) return
     root.batchLoading = true
+    if (batchLookupProc.running) batchLookupProc.running = false
     // Store payload privately on the process; written once to stdin in onStarted
     // and immediately cleared — never exposed as a public IPC getter.
     batchLookupProc.pendingPayload = JSON.stringify(root.batchList)

@@ -749,11 +749,12 @@ def main():
     config = load_config()
     arg1 = sys.argv[1]
 
-    # Batch JSON lookup via stdin — payload is written once by QML onStarted
-    # and never exposed through any persistent IPC getter.
+    # Batch JSON lookup via stdin — payload is a single JSON line written by
+    # QML's onStarted handler followed by \n. readline() returns immediately on
+    # that newline without needing EOF, which QML never sends.
     if arg1 in ("--batch-stdin",):
         try:
-            raw_json = sys.stdin.read()
+            raw_json = sys.stdin.readline()
             items = json.loads(raw_json)
             enriched = batch_lookup_all(items, config)
             print(json.dumps(enriched))
