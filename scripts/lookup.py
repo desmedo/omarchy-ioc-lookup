@@ -194,14 +194,35 @@ def lookup_ip(ip, config):
         url = f"https://api.abuseipdb.com/api/v2/check?ipAddress={urllib.parse.quote(ip)}&maxAgeInDays=90&verbose=false"
         return fetch_json(url, headers={"Key": key, "Accept": "application/json"}, timeout=2.5)
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        f_ptr = executor.submit(get_ptr)
-        f_geo = executor.submit(get_geoip)
-        f_abuse = executor.submit(get_abuseipdb)
+    def get_virustotal_ip():
+        key = config.get("virustotal_api_key")
+        if not key:
+            return None
+        url = f"https://www.virustotal.com/api/v3/ip_addresses/{urllib.parse.quote(ip)}"
+        return fetch_json(url, headers={"x-apikey": key}, timeout=3.0)
 
-        ptr = f_ptr.result()
-        geo = f_geo.result()
+    def get_greynoise():
+        # Community endpoint — no key required, 1 req/s limit
+        url = f"https://api.greynoise.io/v3/community/{urllib.parse.quote(ip)}"
+        headers = {}
+        key = config.get("greynoise_api_key")
+        if key:
+            url = f"https://api.greynoise.io/v2/noise/quick/{urllib.parse.quote(ip)}"
+            headers = {"key": key}
+        return fetch_json(url, headers=headers, timeout=2.5)
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        f_ptr   = executor.submit(get_ptr)
+        f_geo   = executor.submit(get_geoip)
+        f_abuse = executor.submit(get_abuseipdb)
+        f_vt    = executor.submit(get_virustotal_ip)
+        f_gn    = executor.submit(get_greynoise)
+
+        ptr   = f_ptr.result()
+        geo   = f_geo.result()
         abuse = f_abuse.result()
+        vt    = f_vt.result()
+        gn    = f_gn.result()
 
     if geo and geo.get("status") == "success":
         result.update({
@@ -222,15 +243,37 @@ def lookup_ip(ip, config):
 
     if abuse and "data" in abuse:
         d = abuse["data"]
-        result["abuse_score"] = d.get("abuseConfidenceScore", 0)
+        result["abuse_score"]   = d.get("abuseConfidenceScore", 0)
         result["total_reports"] = d.get("totalReports", 0)
-        result["usage_type"] = d.get("usageType", "")
+        result["usage_type"]    = d.get("usageType", "")
+
+    if vt and "data" in vt:
+        attrs = vt["data"].get("attributes", {})
+        stats = attrs.get("last_analysis_stats", {})
+        result["vt_malicious"]  = stats.get("malicious", 0)
+        result["vt_suspicious"] = stats.get("suspicious", 0)
+        result["vt_harmless"]   = stats.get("harmless", 0)
+        result["vt_undetected"] = stats.get("undetected", 0)
+        engines = attrs.get("last_analysis_results", {})
+        result["vt_flagged_by"] = [n for n, r in engines.items() if r.get("category") == "malicious"][:5]
+
+    if gn and "_error" not in gn:
+        result["greynoise_noise"]           = gn.get("noise", False)
+        result["greynoise_riot"]            = gn.get("riot", False)
+        result["greynoise_classification"]  = gn.get("classification", "")
+        result["greynoise_name"]            = gn.get("name", "")
+        result["greynoise_message"]         = gn.get("message", "")
 
     summary = f"{result.get('country', '')} • {result.get('isp', '')}"
-    if result.get('as'):
+    if result.get("as"):
         summary += f" ({result['as']})"
     if "abuse_score" in result:
         summary += f" • Abuse: {result['abuse_score']}%"
+    if result.get("vt_malicious"):
+        summary += f" • VT: {result['vt_malicious']} detections"
+    if result.get("greynoise_noise"):
+        summary += f" • GreyNoise: {result.get('greynoise_classification', 'noise')}"
+
     save_history_entry({
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "query": ip,
@@ -250,6 +293,8 @@ def lookup_domain(domain, config):
         "ips": [],
         "ipv6": [],
         "mx": [],
+        "ns": [],
+        "txt": [],
         "registrar": "",
         "created": "",
         "expires": ""
@@ -276,20 +321,47 @@ def lookup_domain(domain, config):
             return [a["data"] for a in res["Answer"] if a.get("type") == 15]
         return []
 
+    def get_dns_ns():
+        url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=NS"
+        res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
+        if res and "Answer" in res:
+            return [a["data"] for a in res["Answer"] if a.get("type") == 2]
+        return []
+
+    def get_dns_txt():
+        url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=TXT"
+        res = fetch_json(url, headers={"Accept": "application/dns-json"}, timeout=2.0)
+        if res and "Answer" in res:
+            return [a["data"].strip('"') for a in res["Answer"] if a.get("type") == 16][:3]
+        return []
+
     def get_rdap():
         url = f"https://rdap.org/domain/{urllib.parse.quote(domain)}"
         return fetch_json(url, headers={"Accept": "application/json"}, timeout=2.5)
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        f_a = executor.submit(get_dns_a)
-        f_aaaa = executor.submit(get_dns_aaaa)
-        f_mx = executor.submit(get_dns_mx)
-        f_rdap = executor.submit(get_rdap)
+    def get_virustotal_domain():
+        key = config.get("virustotal_api_key")
+        if not key:
+            return None
+        url = f"https://www.virustotal.com/api/v3/domains/{urllib.parse.quote(domain)}"
+        return fetch_json(url, headers={"x-apikey": key}, timeout=3.0)
 
-        result["ips"] = f_a.result()
+    with ThreadPoolExecutor(max_workers=7) as executor:
+        f_a    = executor.submit(get_dns_a)
+        f_aaaa = executor.submit(get_dns_aaaa)
+        f_mx   = executor.submit(get_dns_mx)
+        f_ns   = executor.submit(get_dns_ns)
+        f_txt  = executor.submit(get_dns_txt)
+        f_rdap = executor.submit(get_rdap)
+        f_vt   = executor.submit(get_virustotal_domain)
+
+        result["ips"]  = f_a.result()
         result["ipv6"] = f_aaaa.result()
-        result["mx"] = f_mx.result()
+        result["mx"]   = f_mx.result()
+        result["ns"]   = f_ns.result()
+        result["txt"]  = f_txt.result()
         rdap = f_rdap.result()
+        vt   = f_vt.result()
 
     if rdap and "_error" not in rdap:
         entities = rdap.get("entities", [])
@@ -311,11 +383,25 @@ def lookup_domain(domain, config):
             elif action == "expiration":
                 result["expires"] = date_val
 
+    if vt and "data" in vt:
+        attrs = vt["data"].get("attributes", {})
+        stats = attrs.get("last_analysis_stats", {})
+        result["vt_malicious"]  = stats.get("malicious", 0)
+        result["vt_suspicious"] = stats.get("suspicious", 0)
+        result["vt_harmless"]   = stats.get("harmless", 0)
+        result["vt_undetected"] = stats.get("undetected", 0)
+        result["vt_reputation"] = attrs.get("reputation", None)
+        result["vt_categories"] = list(attrs.get("categories", {}).values())[:3]
+        engines = attrs.get("last_analysis_results", {})
+        result["vt_flagged_by"] = [n for n, r in engines.items() if r.get("category") == "malicious"][:5]
+
     summary = ""
     if result["ips"]:
         summary += f"IPs: {', '.join(result['ips'][:3])}"
     if result.get("registrar"):
         summary += f" • Registrar: {result['registrar']}"
+    if result.get("vt_malicious"):
+        summary += f" • VT: {result['vt_malicious']} detections"
     save_history_entry({
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "query": domain,
@@ -385,14 +471,45 @@ def lookup_cve(cve_id, config):
         cvss_list = metrics.get("cvssMetricV31", []) or metrics.get("cvssMetricV30", [])
         if cvss_list:
             cdata = cvss_list[0].get("cvssData", {})
-            result["score"] = cdata.get("baseScore")
+            result["score"]    = cdata.get("baseScore")
             result["severity"] = cdata.get("baseSeverity", "UNKNOWN").upper()
-            result["vector"] = cdata.get("vectorString", "")
+            result["vector"]   = cdata.get("vectorString", "")
+            result["attack_vector"]       = cdata.get("attackVector", "")
+            result["attack_complexity"]   = cdata.get("attackComplexity", "")
+            result["privileges_required"] = cdata.get("privilegesRequired", "")
+            result["user_interaction"]    = cdata.get("userInteraction", "")
+            result["scope"]               = cdata.get("scope", "")
+            result["confidentiality"]     = cdata.get("confidentialityImpact", "")
+            result["integrity"]           = cdata.get("integrityImpact", "")
+            result["availability"]        = cdata.get("availabilityImpact", "")
         elif "cvssMetricV2" in metrics and metrics["cvssMetricV2"]:
             cdata = metrics["cvssMetricV2"][0].get("cvssData", {})
-            result["score"] = cdata.get("baseScore")
+            result["score"]    = cdata.get("baseScore")
             result["severity"] = metrics["cvssMetricV2"][0].get("baseSeverity", "UNKNOWN").upper()
-            result["vector"] = cdata.get("vectorString", "")
+            result["vector"]   = cdata.get("vectorString", "")
+
+        # CWE weakness identifiers
+        weaknesses = cve_node.get("weaknesses", [])
+        cwes = []
+        for w in weaknesses:
+            for d in w.get("description", []):
+                if d.get("lang") == "en":
+                    cwes.append(d.get("value", ""))
+        result["cwe"] = cwes[:3]
+
+        # First 5 references
+        result["references"] = [r.get("url", "") for r in cve_node.get("references", [])[:5]]
+
+        # Affected product names from CPE
+        configs = cve_node.get("configurations", [])
+        products = set()
+        for cfg in configs:
+            for node in cfg.get("nodes", []):
+                for cpe in node.get("cpeMatch", []):
+                    parts = cpe.get("criteria", "").split(":")
+                    if len(parts) > 4:
+                        products.add(f"{parts[3]} {parts[4]}")
+        result["affected_products"] = sorted(products)[:8]
     else:
         result["description"] = f"No NVD vulnerability details found for {cve_upper}."
 
@@ -424,16 +541,36 @@ def lookup_hash(hash_val, config):
         if vt_data and "data" in vt_data:
             attrs = vt_data["data"].get("attributes", {})
             stats = attrs.get("last_analysis_stats", {})
-            result["vt_malicious"] = stats.get("malicious", 0)
-            result["vt_suspicious"] = stats.get("suspicious", 0)
-            result["vt_harmless"] = stats.get("harmless", 0)
-            result["vt_undetected"] = stats.get("undetected", 0)
-            result["file_type"] = attrs.get("type_description", "")
+            result["vt_malicious"]    = stats.get("malicious", 0)
+            result["vt_suspicious"]   = stats.get("suspicious", 0)
+            result["vt_harmless"]     = stats.get("harmless", 0)
+            result["vt_undetected"]   = stats.get("undetected", 0)
+            result["file_type"]       = attrs.get("type_description", "")
             result["meaningful_name"] = attrs.get("meaningful_name", "")
+            result["file_size"]       = attrs.get("size")
+            result["times_submitted"] = attrs.get("times_submitted", 0)
+            result["known_names"]     = attrs.get("names", [])[:5]
+            result["vt_link"]         = f"https://www.virustotal.com/gui/file/{hash_val}"
+            # Top flagging engines (name + their detection label)
+            engines = attrs.get("last_analysis_results", {})
+            result["vt_detections"] = [
+                {"engine": n, "result": r.get("result", "")}
+                for n, r in engines.items()
+                if r.get("category") == "malicious"
+            ][:8]
+            # Signature info if available (PE/ELF/Mach-O)
+            sig = attrs.get("signature_info", {})
+            if sig:
+                result["signature_subject"]  = sig.get("subject", "")
+                result["signature_verified"]  = sig.get("verified", "")
 
-    summary = f"{algo} Hash ({len(hash_val)} chars)"
+    total_scans = (result.get("vt_malicious", 0) + result.get("vt_harmless", 0) + result.get("vt_undetected", 0))
+    summary = f"{algo} ({len(hash_val)} chars)"
     if "vt_malicious" in result:
-        summary += f" • VT Malicious: {result['vt_malicious']}"
+        summary += f" • VT: {result['vt_malicious']}/{total_scans} detections"
+        if result.get("meaningful_name"):
+            summary += f" [{result['meaningful_name']}]"
+
     save_history_entry({
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "query": hash_val,
