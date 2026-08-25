@@ -2,6 +2,8 @@
 
 An instant, keyboard-driven Indicators of Compromise (IOC) analyzer, multi-IOC batch extractor, investigation notebook, and threat intelligence launcher for Omarchy.
 
+![IOC Lookup Screenshot](screenshot.png)
+
 ---
 
 ## 🚀 Features
