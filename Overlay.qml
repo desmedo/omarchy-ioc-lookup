@@ -977,6 +977,66 @@ Item {
                         }
                       }
                     }
+
+                    // VirusTotal IP Pill
+                    Rectangle {
+                      visible: root.lookupResult && root.lookupResult.vt_malicious !== undefined
+                      Layout.fillWidth: true
+                      implicitHeight: Style.space(36)
+                      color: {
+                        var mal = root.lookupResult ? (root.lookupResult.vt_malicious || 0) : 0
+                        return mal > 0 ? Util.alpha("#ef4444", 0.12) : Util.alpha("#22c55e", 0.12)
+                      }
+                      radius: Style.cornerRadius
+                      RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: Style.space(10)
+                        anchors.rightMargin: Style.space(10)
+                        Text {
+                          textFormat: Text.PlainText
+                          text: "VirusTotal: " + (root.lookupResult ? root.lookupResult.vt_malicious : 0) + " / " + (root.lookupResult ? ((root.lookupResult.vt_malicious || 0) + (root.lookupResult.vt_harmless || 0) + (root.lookupResult.vt_undetected || 0)) : 0) + " detections"
+                          color: {
+                            var mal = root.lookupResult ? (root.lookupResult.vt_malicious || 0) : 0
+                            return mal > 0 ? "#ef4444" : "#22c55e"
+                          }
+                          font.pixelSize: Style.font.caption
+                          font.bold: true
+                        }
+                      }
+                    }
+
+                    // GreyNoise IP Pill
+                    Rectangle {
+                      visible: root.lookupResult && root.lookupResult.greynoise_noise !== undefined
+                      Layout.fillWidth: true
+                      implicitHeight: Style.space(36)
+                      color: {
+                        var noise = root.lookupResult ? root.lookupResult.greynoise_noise : false
+                        var riot = root.lookupResult ? root.lookupResult.greynoise_riot : false
+                        if (riot) return Util.alpha("#3b82f6", 0.12)
+                        if (noise) return Util.alpha("#f59e0b", 0.12)
+                        return Util.alpha(root.fg, 0.05)
+                      }
+                      radius: Style.cornerRadius
+                      RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: Style.space(10)
+                        anchors.rightMargin: Style.space(10)
+                        Text {
+                          textFormat: Text.PlainText
+                          text: "GreyNoise: " + (root.lookupResult && root.lookupResult.greynoise_name ? root.lookupResult.greynoise_name + " (" + root.lookupResult.greynoise_classification + ")" : (root.lookupResult ? root.lookupResult.greynoise_classification : ""))
+                          color: {
+                            var noise = root.lookupResult ? root.lookupResult.greynoise_noise : false
+                            var riot = root.lookupResult ? root.lookupResult.greynoise_riot : false
+                            if (riot) return "#3b82f6"
+                            if (noise) return "#f59e0b"
+                            return Qt.darker(root.fg, 1.3)
+                          }
+                          font.pixelSize: Style.font.caption
+                          font.bold: true
+                        }
+                      }
+                    }
                   }
 
                   // Domain Intelligence
@@ -1046,6 +1106,66 @@ Item {
                         }
                       }
                     }
+
+                    // Domain VT Pill
+                    Rectangle {
+                      visible: root.lookupResult && root.lookupResult.vt_malicious !== undefined
+                      Layout.fillWidth: true
+                      implicitHeight: Style.space(36)
+                      color: {
+                        var mal = root.lookupResult ? (root.lookupResult.vt_malicious || 0) : 0
+                        return mal > 0 ? Util.alpha("#ef4444", 0.12) : Util.alpha("#22c55e", 0.12)
+                      }
+                      radius: Style.cornerRadius
+                      RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: Style.space(10)
+                        anchors.rightMargin: Style.space(10)
+                        Text {
+                          textFormat: Text.PlainText
+                          text: "VirusTotal: " + (root.lookupResult ? root.lookupResult.vt_malicious : 0) + " / " + (root.lookupResult ? ((root.lookupResult.vt_malicious || 0) + (root.lookupResult.vt_harmless || 0) + (root.lookupResult.vt_undetected || 0)) : 0) + " detections"
+                          color: {
+                            var mal = root.lookupResult ? (root.lookupResult.vt_malicious || 0) : 0
+                            return mal > 0 ? "#ef4444" : "#22c55e"
+                          }
+                          font.pixelSize: Style.font.caption
+                          font.bold: true
+                        }
+                      }
+                    }
+
+                    // Domain DNS TXT/NS
+                    Rectangle {
+                      visible: root.lookupResult && (root.lookupResult.txt && root.lookupResult.txt.length > 0 || root.lookupResult.ns && root.lookupResult.ns.length > 0)
+                      Layout.fillWidth: true
+                      implicitHeight: txtCol.implicitHeight + Style.space(16)
+                      color: Util.alpha(root.fg, 0.03)
+                      radius: Style.cornerRadius
+                      ColumnLayout {
+                        id: txtCol
+                        anchors.fill: parent
+                        anchors.margins: Style.space(8)
+                        spacing: 4
+                        Text {
+                          visible: root.lookupResult && root.lookupResult.ns && root.lookupResult.ns.length > 0
+                          textFormat: Text.PlainText
+                          text: "NS: " + (root.lookupResult && root.lookupResult.ns ? root.lookupResult.ns.join(", ") : "")
+                          color: Qt.darker(root.fg, 1.3)
+                          font.pixelSize: 10
+                          elide: Text.ElideRight
+                          Layout.fillWidth: true
+                        }
+                        Text {
+                          visible: root.lookupResult && root.lookupResult.txt && root.lookupResult.txt.length > 0
+                          textFormat: Text.PlainText
+                          text: "TXT: " + (root.lookupResult && root.lookupResult.txt ? root.lookupResult.txt.join(" | ") : "")
+                          color: Qt.darker(root.fg, 1.3)
+                          font.pixelSize: 10
+                          elide: Text.ElideRight
+                          Layout.fillWidth: true
+                        }
+                      }
+                    }
                   }
 
                   // CVE Intelligence
@@ -1111,6 +1231,39 @@ Item {
                       font.pixelSize: Style.font.caption
                       wrapMode: Text.Wrap
                     }
+
+                    // CWE and Affected Products
+                    Rectangle {
+                      visible: root.lookupResult && (root.lookupResult.cwe && root.lookupResult.cwe.length > 0 || root.lookupResult.affected_products && root.lookupResult.affected_products.length > 0)
+                      Layout.fillWidth: true
+                      implicitHeight: cveExtCol.implicitHeight + Style.space(16)
+                      color: Util.alpha(root.fg, 0.03)
+                      radius: Style.cornerRadius
+                      ColumnLayout {
+                        id: cveExtCol
+                        anchors.fill: parent
+                        anchors.margins: Style.space(8)
+                        spacing: 4
+                        Text {
+                          visible: root.lookupResult && root.lookupResult.cwe && root.lookupResult.cwe.length > 0
+                          textFormat: Text.PlainText
+                          text: "CWE: " + (root.lookupResult && root.lookupResult.cwe ? root.lookupResult.cwe.join(" | ") : "")
+                          color: Qt.darker(root.fg, 1.3)
+                          font.pixelSize: 10
+                          elide: Text.ElideRight
+                          Layout.fillWidth: true
+                        }
+                        Text {
+                          visible: root.lookupResult && root.lookupResult.affected_products && root.lookupResult.affected_products.length > 0
+                          textFormat: Text.PlainText
+                          text: "Affected: " + (root.lookupResult && root.lookupResult.affected_products ? root.lookupResult.affected_products.join(", ") : "")
+                          color: Qt.darker(root.fg, 1.3)
+                          font.pixelSize: 10
+                          wrapMode: Text.Wrap
+                          Layout.fillWidth: true
+                        }
+                      }
+                    }
                   }
 
                   // Hash Intelligence
@@ -1159,6 +1312,48 @@ Item {
                           }
                           font.pixelSize: Style.font.caption
                           font.bold: true
+                        }
+                      }
+                    }
+
+                    // Hash Metadata
+                    Rectangle {
+                      visible: root.lookupResult && (root.lookupResult.file_type || root.lookupResult.file_size || root.lookupResult.meaningful_name)
+                      Layout.fillWidth: true
+                      implicitHeight: metaCol.implicitHeight + Style.space(16)
+                      color: Util.alpha(root.fg, 0.03)
+                      radius: Style.cornerRadius
+                      ColumnLayout {
+                        id: metaCol
+                        anchors.fill: parent
+                        anchors.margins: Style.space(8)
+                        spacing: 4
+                        Text {
+                          visible: root.lookupResult && root.lookupResult.meaningful_name
+                          textFormat: Text.PlainText
+                          text: "Name: " + (root.lookupResult ? root.lookupResult.meaningful_name : "")
+                          color: Qt.darker(root.fg, 1.3)
+                          font.pixelSize: 10
+                          elide: Text.ElideRight
+                          Layout.fillWidth: true
+                        }
+                        Text {
+                          visible: root.lookupResult && root.lookupResult.file_type
+                          textFormat: Text.PlainText
+                          text: "Type: " + (root.lookupResult ? root.lookupResult.file_type : "") + (root.lookupResult && root.lookupResult.file_size ? " (" + Math.round(root.lookupResult.file_size / 1024) + " KB)" : "")
+                          color: Qt.darker(root.fg, 1.3)
+                          font.pixelSize: 10
+                          elide: Text.ElideRight
+                          Layout.fillWidth: true
+                        }
+                        Text {
+                          visible: root.lookupResult && root.lookupResult.vt_detections && root.lookupResult.vt_detections.length > 0
+                          textFormat: Text.PlainText
+                          text: "Detected by: " + (root.lookupResult && root.lookupResult.vt_detections ? root.lookupResult.vt_detections.map(function(e) { return e.engine; }).join(", ") : "")
+                          color: "#ef4444"
+                          font.pixelSize: 10
+                          wrapMode: Text.Wrap
+                          Layout.fillWidth: true
                         }
                       }
                     }
