@@ -567,15 +567,12 @@ def main():
     config = load_config()
     arg1 = sys.argv[1]
 
-    # Batch JSON lookup
-    if arg1 in ("--batch-ipc",):
+    # Batch JSON lookup via stdin — payload is written once by QML onStarted
+    # and never exposed through any persistent IPC getter.
+    if arg1 in ("--batch-stdin",):
         try:
-            # Connect to omarchy-shell via IPC to securely retrieve the list without command line exposure
-            result = subprocess.run(["omarchy-shell", "desmedo.ioc-lookup", "getBatchData"], capture_output=True, text=True, timeout=3)
-            if result.returncode != 0:
-                print(json.dumps({"status": "error", "message": "Failed to IPC getBatchData: " + result.stderr}))
-                return
-            items = json.loads(result.stdout)
+            raw_json = sys.stdin.read()
+            items = json.loads(raw_json)
             enriched = batch_lookup_all(items, config)
             print(json.dumps(enriched))
         except Exception as e:

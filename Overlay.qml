@@ -104,7 +104,10 @@ Item {
   function runBatchLookup() {
     if (!root.batchList || root.batchList.length === 0) return
     root.batchLoading = true
-    batchLookupProc.command = ["python3", root.lookupScript, "--batch-ipc"]
+    // Store payload privately on the process; written once to stdin in onStarted
+    // and immediately cleared — never exposed as a public IPC getter.
+    batchLookupProc.pendingPayload = JSON.stringify(root.batchList)
+    batchLookupProc.command = ["python3", root.lookupScript, "--batch-stdin"]
     batchLookupProc.running = true
   }
 
@@ -257,6 +260,14 @@ Item {
 
   Process {
     id: batchLookupProc
+    stdinEnabled: true
+    // Private one-shot payload — written to stdin the moment the process starts,
+    // then wiped so no persistent getter can expose it.
+    property string pendingPayload: ""
+    onStarted: {
+      write(pendingPayload + "\n")
+      pendingPayload = ""
+    }
     stdout: StdioCollector {
       id: batchCollector
       waitForEnd: true
@@ -293,7 +304,8 @@ Item {
     function open(payloadJson: string): string { root.open(payloadJson); return "ok" }
     function close(): string { root.close(); return "ok" }
     function toggle(): string { root.toggle(); return "ok" }
-    function getBatchData(): string { return JSON.stringify(root.batchList) }
+    // getBatchData intentionally removed — batch payload is private and
+    // transferred once over stdin; no persistent public getter is exposed.
   }
 
   // ------------------------------------------------------------- UI
