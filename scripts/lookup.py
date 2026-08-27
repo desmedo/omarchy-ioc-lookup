@@ -46,14 +46,18 @@ def load_config():
             return {}
     return {}
 
+import stat
+
 def load_history():
-    if os.path.isfile(HISTORY_PATH):
-        try:
-            with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
+    try:
+        fd = os.open(HISTORY_PATH, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'r', encoding='utf-8') as f:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_size > 1024 * 1024:
+                return []
+            return json.load(f)
+    except Exception:
+        return []
 
 def save_history_entry(entry):
     try:
@@ -62,8 +66,27 @@ def save_history_entry(entry):
         hist = [h for h in hist if h.get("query", "").lower() != entry.get("query", "").lower()]
         hist.insert(0, entry)
         hist = hist[:100]
-        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+        
+        tmp_path = HISTORY_PATH + ".tmp"
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(hist, f, indent=2)
+        os.replace(tmp_path, HISTORY_PATH)
+    except Exception:
+        pass
+
+def clear_history():
+    try:
+        os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+        tmp_path = HISTORY_PATH + ".tmp"
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write("[]")
+        os.replace(tmp_path, HISTORY_PATH)
     except Exception:
         pass
 
@@ -770,6 +793,14 @@ def main():
             print(json.dumps(enriched))
         except Exception as e:
             print(json.dumps({"status": "error", "message": str(e)}))
+        return
+
+    if arg1 == "--get-history":
+        print(json.dumps(load_history()))
+        return
+
+    if arg1 == "--clear-history":
+        clear_history()
         return
 
     # CLI flags

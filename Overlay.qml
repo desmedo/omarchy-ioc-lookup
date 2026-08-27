@@ -143,17 +143,8 @@ Item {
   }
 
   function reloadHistory() {
-    try {
-      historyFile.reload()
-      var raw = historyFile.text()
-      if (raw && raw.length > 2) {
-        root.historyList = JSON.parse(raw)
-      } else {
-        root.historyList = []
-      }
-    } catch (e) {
-      root.historyList = []
-    }
+    historyProc.running = false
+    historyProc.running = true
   }
 
   function exportMarkdownReport() {
@@ -164,7 +155,7 @@ Item {
 
   function clearHistory() {
     root.historyList = []
-    Quickshell.execDetached(["python3", "-c", "import os, json; f=os.path.expanduser('~/.local/state/omarchy/ioc-history.json'); open(f,'w').write('[]') if os.path.exists(f) else None"])
+    Quickshell.execDetached(["python3", root.lookupScript, "--clear-history"])
     root.showToast("Cleared history")
   }
 
@@ -216,18 +207,30 @@ Item {
   }
 
   // ------------------------------------------------------------- Processes
-  FileView {
-    id: historyFile
-    path: root.historyPath
-    watchChanges: true
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.reloadHistory()
+  Process {
+    id: historyProc
+    command: ["python3", root.lookupScript, "--get-history"]
+    stdout: StdioCollector {
+      id: historyCollector
+      waitForEnd: true
+      onStreamFinished: {
+        var raw = historyCollector.text || ""
+        try {
+          if (raw && raw.length > 2) {
+            root.historyList = JSON.parse(raw)
+          } else {
+            root.historyList = []
+          }
+        } catch (e) {
+          root.historyList = []
+        }
+      }
+    }
   }
 
   Process {
     id: clipProc
-    command: ["sh", "-c", "wl-paste --no-newline | head -c 50000"]
+    command: ["sh", "-c", "timeout 2 wl-paste --no-newline | head -c 50000"]
     stdout: StdioCollector {
       id: clipCollector
       waitForEnd: true
